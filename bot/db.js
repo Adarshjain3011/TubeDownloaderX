@@ -1,11 +1,20 @@
-const mysql = require('mysql')
+const mysql = require('mysql');
+
+require("dotenv").config({ path: "../.env" });
+
+console.log(process.env.DB_PASSWORD)
+
+const DB_HOSTNAME="localhost"
+const DB_USERNAME="root"
+const DB_PASSWORD="123456"
+const DB_DATABASE="youtube"
 
 // ----------- DB --------------
 const sql = mysql.createPool({
-    host: process.env.DB_HOSTNAME,
-    user: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
+    host: DB_HOSTNAME,
+    user: DB_USERNAME,
+    password: DB_PASSWORD,
+    database: DB_DATABASE,
     debug: false
 })
 

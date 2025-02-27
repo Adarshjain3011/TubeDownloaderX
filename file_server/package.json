@@ -5,14 +5,15 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "file": "nodemon server.js"
   },
-  "author": "Jayesh Saini",
+  "author": "Adarsh Jain",
   "license": "ISC",
   "dependencies": {
     "@ngrok/ngrok": "^1.2.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.4.7",
     "mysql": "^2.18.1",
+    "nodemon": "^3.1.9",
     "redis": "^4.6.13"
   }
 }

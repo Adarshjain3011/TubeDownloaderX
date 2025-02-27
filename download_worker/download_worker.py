@@ -1,18 +1,23 @@
 import redis
-from time import sleep
-from pytube import YouTube
-import mysql.connector
-import uuid
-import os
 import json
+import os
+import uuid
+import mysql.connector
+import yt_dlp
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
-queue = redis.Redis(decode_responses=True)
 
+# Redis connection
+queue = redis.Redis(host='localhost', port=6379, decode_responses=True)
+
+# YouTube download path
 publicYtDownloadPath = os.path.join(os.getcwd(), "downloads")
 
-def log(id, chat_id, rsp, name, username):
+os.makedirs(publicYtDownloadPath, exist_ok=True)  # Ensure download directory exists
+
+def log(id, chat_id, file_path, name, username):
     try:
         mydb = mysql.connector.connect(
             host=os.getenv("DB_HOSTNAME"),
@@ -23,37 +28,55 @@ def log(id, chat_id, rsp, name, username):
         )
 
         statement = "INSERT INTO big_file_urls(UUID, CHAT_ID, FILE_NAME, NAME, USERNAME) VALUES(%s, %s, %s, %s, %s)"
+        data = (id, chat_id, file_path, name, username)
         
-        data = (id, chat_id, rsp, name, username)
         cur = mydb.cursor()
         cur.execute(statement, data)
         mydb.commit()
         cur.close()
         mydb.close()
-        return 1
+        
+        return True
     except mysql.connector.Error as my_error:
-        print(my_error)
-        return 0
+        print("Database Error:", my_error)
+        return False
 
 while True:
+    try:
+        # Get data from Redis queue
+        response = queue.brpop("youtube_download_queue")
+        if not response:
+            continue
+        
+        data = json.loads(response[1])
+        print("Processing:", data)
 
-    data = json.loads(queue.brpop("youtube_download_queue")[1])
-    print('----------')
-    video_url = data["video_url"]
-    name = data["name"]
-    username = data["username"]
-    chat_id = data["chat_id"]
+        video_url = data["video_url"]
+        name = data["name"]
+        username = data["username"]
+        chat_id = data["chat_id"]
 
-    yt = YouTube(video_url, use_oauth=True, allow_oauth_cache=True)
+        # Generate unique filename
+        id = str(uuid.uuid4())
+        output_template = os.path.join(publicYtDownloadPath, f"{id}.%(ext)s")
+        
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': output_template
+        }
+        
+        # Download YouTube video
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=True)
+            file_path = ydl.prepare_filename(info)
 
-    print("Downloading: ", yt.title)
-    rsp = yt.streams.get_highest_resolution().download(publicYtDownloadPath)
-    print("File Path: ", rsp)
-    fileSize = os.path.getsize(rsp)
-    id = str(uuid.uuid4())
+        print("Download complete:", file_path)
 
-    r = log(id, chat_id, rsp, name, username)
-    if (r == 1):
-        queue.publish('download_complete', id)
-    else:
-        print("Unable to update DB!")
+        # Save to database
+        if log(id, chat_id, file_path, name, username):
+            queue.publish('download_complete', id)
+        else:
+            print("Unable to update DB!")
+
+    except Exception as e:
+        print("Error:", e)

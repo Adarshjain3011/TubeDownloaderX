@@ -1,80 +1,98 @@
-require("dotenv").config()
-const url = require("url")
-const http = require('http')
-const ngrok = require('@ngrok/ngrok')
-const redis = require('redis')
-const { sql } = require('./db')
-const fs = require("fs")
+require("dotenv").config({ path: "../.env" });
+const url = require("url");
+const http = require("http");
+const ngrok = require("@ngrok/ngrok");
+const redis = require("redis");
+const { sql } = require("./db");
+const fs = require("fs");
 
 let NGROK_BASE_URL = "";
 let cache = null, publisher = null;
 
+// ✅ Move NGROK_AUTHTOKEN into a proper variable
+const NGROK_AUTHTOKEN=process.env.NGROK_AUTHTOKEN;
+
+console.log("NGROK_AUTHTOKEN",NGROK_AUTHTOKEN);
+
 (async () => {
-    cache = redis.createClient()
-    publisher = redis.createClient()
+    try {
+        cache = redis.createClient();
+        publisher = redis.createClient();
 
-    await cache.connect()
-    await publisher.connect()
+        await cache.connect();
+        await publisher.connect();
 
-    cache.on("error", (error) => {
-        console.error(`Error : ${error}`)
-    })
+        cache.on("error", (error) => {
+            console.error(`Redis Error: ${error}`);
+        });
 
-    console.log('Redis connected!')
-})()
+        console.log("✅ Redis connected successfully!");
+    } catch (error) {
+        console.error("❌ Redis connection failed:", error);
+    }
+})();
 
-// Create webserver
-http.createServer((req, res) => {
-    console.log(req.url)
-    var requestedURL = req.url
-    if (requestedURL.startsWith('/video')) {
+// Create web server
+const server = http.createServer((req, res) => {
+    console.log("Request received:", req.url);
+    const requestedURL = req.url;
 
-        const parsedUrl = url.parse(requestedURL, true)
-
-        // Get the query parameters from the parsed URL
+    if (requestedURL.startsWith("/video")) {
+        const parsedUrl = url.parse(requestedURL, true);
         const { video_id } = parsedUrl.query;
 
-        if (video_id == null) {
-            return res.end("Invalid video id")
+        if (!video_id) {
+            return res.end("Invalid video ID");
         }
 
-        sql.query("SELECT file_name FROM big_file_urls WHERE uuid = ?", video_id, (err, data) => {
+        sql.query("SELECT file_name FROM big_file_urls WHERE uuid = ?", [video_id], (err, data) => {
             if (err) {
-                console.log(err)
-                return res.end("Something went wrong!")
-            } else if (data.length == 1) {
-                const videoPath = data[0].file_name
+                console.error("❌ SQL Error:", err);
+                return res.end("Something went wrong!");
+            }
+
+            if (data.length === 1) {
+                const videoPath = data[0].file_name;
 
                 fs.stat(videoPath, (err, stats) => {
                     if (err) {
-                        console.error('Error reading video file:', err)
+                        console.error("❌ Error reading video file:", err);
                         res.statusCode = 500;
-                        res.end('Internal Server Error');
-                        return
+                        return res.end("Internal Server Error");
                     }
 
                     // Set headers
                     res.writeHead(200, {
-                        'Content-Type': 'video/mp4',
-                        'Content-Length': stats.size
-                    })
+                        "Content-Type": "video/mp4",
+                        "Content-Length": stats.size,
+                    });
 
-                    const videoStream = fs.createReadStream(videoPath)
-                    videoStream.pipe(res)
-                })
+                    const videoStream = fs.createReadStream(videoPath);
+                    videoStream.pipe(res);
+                });
             } else {
-                console.log(data)
-                return res.end("Video not found!")
+                console.log("⚠️ Video not found:", data);
+                return res.end("Video not found!");
             }
-        })
+        });
+    } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
     }
-}).listen(8080, () => console.log('Node.js web server at 8080 is running...'))
+});
 
-// Get your endpoint online
-ngrok.connect({ addr: 8080, authtoken_from_env: true })
-    .then((listener) => {
-        NGROK_BASE_URL = listener.url()
-        cache.set("NGROK_BASE_URL", NGROK_BASE_URL)
-        publisher.publish("NGROK_BASE_URL_UPDATED", NGROK_BASE_URL)
-        console.log(`Ingress established at: ${listener.url()}`)
-    })
+server.listen(8080, () => console.log("🚀 Node.js web server is running on port 8080..."));
+
+// ✅ Ensure NGROK_AUTHTOKEN is defined before using it
+if (!NGROK_AUTHTOKEN) {
+    console.error("❌ Ngrok Auth Token is missing! Please add it to your .env file.");
+} else {
+    ngrok.connect({ addr: 8080, authtoken: NGROK_AUTHTOKEN })
+        .then((listener) => {
+            NGROK_BASE_URL = listener.url();
+            cache.set("NGROK_BASE_URL", NGROK_BASE_URL);
+            publisher.publish("NGROK_BASE_URL_UPDATED", NGROK_BASE_URL);
+            console.log(`🌍 Ngrok tunnel established at: ${NGROK_BASE_URL}`);
+        })
+        .catch((err) => console.error("❌ Ngrok connection failed:", err));
+}

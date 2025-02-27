@@ -1,3 +1,5 @@
+require("dotenv").config({ path: "../.env" });
+
 const mysql = require('mysql')
 
 // ----------- DB --------------
@@ -8,6 +10,7 @@ const sql = mysql.createPool({
     database: process.env.DB_DATABASE,
     debug: false
 })
+
 
 sql.getConnection((err, connection) => {
     if (err) {
